@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!--
+  ============================================================================
+  MapVeil — encrypted directory (single-file app)
+
+  build.py replaces the payload marker (in the JavaScript below) with base64
+  chunks of the AES-256-encrypted database. The marker must appear EXACTLY
+  ONCE in this file — never spell it out in comments, or the build would
+  inject the ciphertext there as well.
+
+  ---------------------------------------------------------------------------
+  HOW TO CUSTOMIZE
+  ---------------------------------------------------------------------------
+  * Startup map view ............ HOME constant (lat, lon, zoom) below
+  * "Generate with ..." link .... search for  EDIT LINK HERE  (link + label)
+  * Colors / fonts .............. the :root CSS variables below
+  * Pin size .................... PIN_SIZE / PIN_ACTIVE constants below
+  * Layout breakpoint ........... LAYOUT_BREAKPOINT (px) below
+  * Everything else (tag colors, size of the tag list) comes from
+    database.yaml -> settings and needs no code change.
+
+  NOTE: this comment must stay AFTER the <meta charset> line — placing it
+  before <meta charset> pushes the charset declaration past the first
+  kilobyte of the file, which triggers HTML-validator warnings.
+  ============================================================================
+-->
+  <title>MapVeil</title>
+ <link rel="icon" href="data:image/svg+xml,
+ <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+  <clipPath id='c'>
+    <circle cx='32' cy='32' r='28'/></clipPath>
+  <g fill='none' stroke='%237b8cff' stroke-width='4' stroke-linecap='round'>
+    <circle cx='32' cy='32' r='28'/>
+    <ellipse cx='32' cy='32' rx='12' ry='28'/>
+    <ellipse cx='32' cy='32' rx='28' ry='12'/>
+    <line x1='6.5' y1='21' x2='57.5' y2='21'/>
+    <line x1='6.5' y1='43' x2='57.5' y2='43'/></g></svg>">
+ <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+  <style>
+    :root {
+      --accent: #7b8cff;
+      /* links, focus rings, pins, selection */
+      --bg: #1b1d22;
+      /* app background */
+      --panel: #25272e;
+      /* sidebar / cards */
+      --border: #33363d;
+      --text: #e8eaf0;
+      --text-dim: #9aa0ad;
+      --danger: #e0565a;
+      --chip-bg: #2e313a;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    /* ---------------- password gate ---------------- */
+    #gate {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #23252e 0%, #1b1d22 60%);
+      z-index: 2000;
+      padding: 16px;
+    }
+
+    .gate-box {
+      width: min(360px, 90vw);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 36px 32px 26px;
+      text-align: center;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+    }
+
+    .gate-box h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .gate-sub {
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 22px;
+    }
+
+    #password {
+      width: 100%;
+      padding: 11px 12px;
+      font-size: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: center;
+      letter-spacing: 1px;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    #password:focus {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+    }
+
+    #unlock-btn {
+      width: 100%;
+      margin-top: 14px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #unlock-btn:hover {
+      filter: brightness(1.08);
+    }
+
+    #unlock-error {
+      min-height: 18px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--danger);
+    }
+
+    /* EDIT LINK HERE — href and label of the link below the password form */
+    .powered-by {
+      margin-top: 20px;
+      font-size: 12.5px;
+    }
+
+    .powered-by a {
+      color: var(--text-dim);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    .powered-by a:hover {
+      color: var(--accent);
+    }
+
+    /* ---------------- app layout (desktop = side by side) ---------------- */
+    #app {
+      display: none;
+      height: 100vh;
+    }
+
+    .layout {
+      display: flex;
+      height: 100%;
+    }
+
+    #sidebar {
+      width: 320px;
+      min-width: 280px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .side-head {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .brand {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+
+    .head-btn {
+      font-size: 12.5px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text-dim);
+      line-height: 1;
+    }
+
+    #close-list-btn {
+      display: none;
+      font-size: 16px;
+      padding: 4px 12px;
+    }
+
+    #lock-btn:hover {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    #layout-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .search-wrap {
+      position: relative;
+      margin-top: 12px;
+    }
+
+    #search {
+      width: 100%;
+      padding: 9px 66px 9px 34px;
+      font-size: 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    #search::placeholder {
+      color: var(--text-dim);
+    }
+
+    #search:focus {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+      background: var(--panel);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      pointer-events: none;
+      font-size: 13px;
+    }
+
+    .search-hint {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 11px;
+      color: var(--text-dim);
+      background: var(--chip-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    /* ---------------- tags ---------------- */
+    .tags-panel {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      max-height: 38%;
+      overflow: auto;
+    }
+
+    .tags-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    #tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag-chip {
+      --tag-col: transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      font-size: 12.5px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+
+    .tag-chip .cnt {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .tag-chip.chip-colored {
+      border-color: var(--tag-col);
+      color: var(--tag-col);
+      background: color-mix(in srgb, var(--tag-col) 14%, var(--panel));
+    }
+
+    .tag-chip.chip-colored .cnt {
+      color: inherit;
+      opacity: .65;
+    }
+
+    /* Colored tags fill with their own color when selected;
+     uncolored tags fill with the violet accent. */
+    .tag-chip.chip-colored.chip-selected {
+      background: var(--tag-col);
+      border-color: var(--tag-col);
+      color: #fff !important;
+    }
+
+    .tag-chip.chip-selected:not(.chip-colored) {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff !important;
+    }
+
+    .tag-chip.chip-selected .cnt {
+      color: #fff;
+      opacity: .8;
+    }
+
+    #toggle-tags {
+      margin-top: 8px;
+      font-size: 12px;
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      padding: 0;
+    }
+
+    #tag-empty {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    /* ---------------- result list ---------------- */
+    #result-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 18px 24px;
+      list-style: none;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color .12s, box-shadow .12s;
+    }
+
+    .card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+    }
+
+    .card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+
+    /* Brief pulse when a card is scrolled into view after a pin selection */
+    .card.flash {
+      animation: card-flash 1.2s ease-out;
+    }
+
+    @keyframes card-flash {
+      0% {
+        box-shadow: 0 0 0 3px var(--accent);
+      }
+
+      100% {
+        box-shadow: 0 0 0 1px transparent;
+      }
+    }
+
+    .card h3 {
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .card .addr {
+      font-size: 12.5px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    .card .nomap {
+      font-size: 11.5px;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    .card .fields {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 10px;
+    }
+
+    .card .fields dt {
+      font-size: 11.5px;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+
+    .card .fields dd {
+      font-size: 12.5px;
+      overflow-wrap: anywhere;
+    }
+
+    .card .tagrow {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .mini-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--chip-bg);
+    }
+
+    .mini-tag.colored {
+      border-color: var(--tag-col);
+      color: var(--tag-col);
+      background: color-mix(in srgb, var(--tag-col) 14%, var(--panel));
+    }
+
+    .mini-tag.selected {
+      background: var(--tag-col, var(--accent));
+      border-color: var(--tag-col, var(--accent));
+      color: #fff;
+    }
+
+    .mini-tag.clickable {
+      cursor: pointer;
+    }
+
+    .mini-tag.clickable:hover {
+      border-color: var(--accent);
+    }
+
+    .card a {
+      font-size: 12.5px;
+      color: var(--accent);
+      word-break: break-all;
+    }
+
+    .no-results {
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 13.5px;
+      padding: 30px 10px;
+    }
+
+    /* ---------------- map ---------------- */
+    #mapwrap {
+      flex: 1;
+      position: relative;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      background: #14151a;
+    }
+
+    .leaflet-popup-content-wrapper,
+    .leaflet-popup-tip {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .leaflet-popup-content {
+      font-family: inherit;
+      margin: 10px 14px;
+    }
+
+    .leaflet-container a.leaflet-popup-close-button {
+      color: var(--text-dim);
+    }
+
+    /* Zoom buttons sit top-RIGHT (set in initMap) so they never collide with
+     the floating ☰ List pill in the top-left corner. */
+    .leaflet-control-zoom a {
+      background: var(--panel);
+      color: var(--text);
+      border-color: var(--border) !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: var(--chip-bg);
+      color: var(--accent);
+    }
+
+    .popup h4 {
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+
+    .popup .p-addr {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    .popup .p-tags {
+      margin-bottom: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .popup .mini-tag {
+      font-size: 10.5px;
+      padding: 1px 7px;
+    }
+
+    .popup a {
+      font-size: 12px;
+      color: var(--accent);
+    }
+
+    /* Floating "open list" pill (mobile, list closed) — also carries the
+     record counter, since the footer bar is behind the overlay. */
+    #show-list {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .4);
+    }
+
+    /* ---------------- footer bar ---------------- */
+    #app-footer {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 900;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 12px;
+      background: rgba(27, 29, 34, .92);
+      border-top: 1px solid var(--border);
+      font-size: 12.5px;
+      color: var(--text-dim);
+      backdrop-filter: blur(3px);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* ---------------- MOBILE layout ----------------
+     Class-based (not media-query-based) so the header button can override
+     it on any screen size. The map always fills the screen; the directory
+     list is a FULL-SCREEN overlay toggled with body.list-open.
+     Desktop CSS above stays untouched. */
+    body.layout-mobile .layout {
+      display: block;
+    }
+
+    body.layout-mobile #mapwrap {
+      position: absolute;
+      inset: 0;
+    }
+
+    body.layout-mobile #sidebar {
+      display: none;
+      /* list hidden by default */
+      position: fixed;
+      inset: 0;
+      z-index: 1100;
+      /* full-screen overlay when open */
+      width: 100%;
+      min-width: 0;
+      border-right: none;
+    }
+
+    body.layout-mobile.list-open #sidebar {
+      display: flex;
+    }
+
+    /* the ✕ close button only exists in the mobile overlay */
+    body.layout-mobile.list-open #close-list-btn {
+      display: inline-block;
+    }
+
+    /* the ☰ pill only when the overlay is closed */
+    body.layout-mobile:not(.list-open) #show-list {
+      display: flex;
+    }
+
+    @media (max-width:480px) {
+      body.layout-mobile .side-head {
+        padding: 12px 14px 10px;
+      }
+
+      body.layout-mobile .tags-panel {
+        padding: 10px 14px;
+      }
+
+      body.layout-mobile #result-list {
+        padding: 10px 14px 18px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ================= PASSWORD GATE ================= -->
+  <div id="gate">
+    <div class="gate-box">
+      <h1>MapVeil</h1>
+      <p class="gate-sub">Enter the master password to unlock the directory.</p>
+      <input type="password" id="password" autocomplete="off" placeholder="Password">
+      <button id="unlock-btn">Unlock</button>
+      <div id="unlock-error" role="alert"></div>
+      <!-- EDIT LINK HERE: change the href below (and optionally the label text) -->
+      <p class="powered-by">
+        <a href="https://github.com/H4w4k4/MapVeil" target="_blank" rel="noopener">Generate with MapVeil</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- ================= APP ================= -->
+  <div id="app">
+    <div class="layout">
+      <aside id="sidebar">
+        <div class="side-head">
+          <div class="brand-row">
+            <div class="brand">Directory</div>
+            <div style="display:flex; gap:6px;">
+              <button id="close-list-btn" class="head-btn" title="Close list, show map">✕</button>
+              <button id="layout-btn" class="head-btn" title="Toggle mobile / desktop layout">🖥</button>
+              <button id="lock-btn" class="head-btn">Lock</button>
+            </div>
+          </div>
+          <div class="search-wrap">
+            <span class="search-icon">&#128269;</span>
+            <input id="search" type="text" autocomplete="off" placeholder='Search all fields — or "tag: PCB"'>
+            <span class="search-hint">all fields</span>
+          </div>
+        </div>
+
+        <div class="tags-panel">
+          <div class="tags-title">Filter by tag</div>
+          <div id="tag-list"></div>
+          <div id="tag-empty" class="hidden">No tags in the current search results.</div>
+          <button id="toggle-tags" class="hidden"></button>
+        </div>
+
+        <ul id="result-list"></ul>
+      </aside>
+
+      <div id="mapwrap">
+        <div id="map"></div>
+        <button id="show-list">☰ List <span id="pill-count"></span></button>
+        <div id="app-footer">
+          <span id="result-count"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    /* ======================================================================
+       Encrypted payload slot — build.py replaces the marker below with quoted
+       base64 chunks (max 1 kB per line), joined here into one string.
+       ====================================================================== */
+    const B64 = [
+      __PAYLOAD_LINES__
+    ].join("");
+
+    /* ===================== startup view (customize here) ===================== */
+    const HOME = { lat: 46.82, lon: 8.23, zoom: 8 };
+
+    /* ===================== pin size (customize here) ===================== */
+    const PIN_SIZE = 20;       /* normal marker, px */
+    const PIN_ACTIVE = 28;     /* selected marker, px */
+
+    /* ===================== layout (customize here) ===================== */
+    const LAYOUT_BREAKPOINT = 760;          /* px — below this, default = mobile */
+    const LAYOUT_KEY = "mapveil-layout";    /* localStorage key for the user's choice */
+
+    /* ===================== helpers ===================== */
+    const el = id => document.getElementById(id);
+
+    async function sha256Hex(str) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    /* Display/search normalization: booleans -> yes/no, arrays joined,
+       objects stringified — matches what the card renders. */
+    function normalizeValue(v) {
+      if (v === true) return "yes";
+      if (v === false) return "no";
+      if (Array.isArray(v)) return v.map(normalizeValue).join("; ");
+      if (v && typeof v === "object") return JSON.stringify(v);
+      return String(v);
+    }
+
+    function recordKey(r) { return (r.lat ?? "") + "," + (r.lon ?? "") + "|" + (r.name ?? ""); }
+
+    /* Case- and accent-insensitive alphabetical comparison (tags AND records). */
+    function alphaCompare(a, b) {
+      return String(a).localeCompare(String(b), undefined, { sensitivity: "base" });
+    }
+
+    function compareByName(r1, r2) {
+      return alphaCompare(r1.name ?? "", r2.name ?? "");
+    }
+
+    /* ===================== state ===================== */
+    let DATA = null;                       // {tagColors, topTagsVisible, records}
+    const state = { search: "", tags: new Set(), allTagsShown: false };
+    const cardsByKey = new Map();          // recordKey -> rendered <li>
+
+    /* ===================== layout switch (desktop / mobile) =====================
+       Mobile = full-screen map + full-screen list overlay (never a split view).
+       - openList()  shows the overlay
+       - closeList() hides it, revealing the full map underneath            */
+    function currentLayout() {
+      return document.body.classList.contains("layout-mobile") ? "mobile" : "desktop";
+    }
+
+    function openList() {
+      document.body.classList.add("list-open");
+    }
+
+    function closeList() {
+      document.body.classList.remove("list-open");
+      if (map) setTimeout(() => map.invalidateSize(), 50);
+    }
+
+    function applyLayout(mode, persist) {
+      document.body.classList.toggle("layout-mobile", mode === "mobile");
+      el("layout-btn").textContent = mode === "mobile" ? "🖥" : "📱";
+      el("layout-btn").title = mode === "mobile"
+        ? "Currently MOBILE layout — click for desktop"
+        : "Currently DESKTOP layout — click for mobile";
+      if (mode === "mobile") openList();          /* start with the list, like a phone app */
+      else closeList();
+      if (persist) { try { localStorage.setItem(LAYOUT_KEY, mode); } catch (e) { } }
+      if (map) setTimeout(() => map.invalidateSize(), 50);
+    }
+
+    function initLayout() {
+      let saved = null;
+      try { saved = localStorage.getItem(LAYOUT_KEY); } catch (e) { }
+      const auto = window.innerWidth <= LAYOUT_BREAKPOINT ? "mobile" : "desktop";
+      applyLayout(saved === "mobile" || saved === "desktop" ? saved : auto, false);
+      el("layout-btn").addEventListener("click", () => {
+        applyLayout(currentLayout() === "mobile" ? "desktop" : "mobile", true);
+      });
+      el("show-list").addEventListener("click", openList);
+      el("close-list-btn").addEventListener("click", closeList);
+    }
+
+    /* ===================== unlock / lock ===================== */
+    async function unlock() {
+      const pass = el("password").value;
+      const err = el("unlock-error");
+      err.textContent = "";
+      if (!pass) { err.textContent = "Please enter the password."; return; }
+      try {
+        const key = CryptoJS.enc.Hex.parse(await sha256Hex(pass));
+        const decrypted = CryptoJS.AES.decrypt(
+          { ciphertext: CryptoJS.enc.Base64.parse(B64) }, key,
+          { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.Pkcs7 });
+        const text = decrypted.toString(CryptoJS.enc.Utf8);
+        if (!text) throw new Error("empty plaintext");
+        const parsed = JSON.parse(text);
+        if (!parsed || !Array.isArray(parsed.records)) throw new Error("unexpected structure");
+        DATA = parsed;
+        showApp();
+      } catch (e) {
+        err.textContent = "Wrong password or corrupted file.";
+      }
+    }
+
+    function showApp() {
+      el("gate").style.display = "none";
+      el("app").style.display = "block";
+      initMap();
+      initApp();
+      /* The map was initialized while the pane was still hidden: force Leaflet
+         to re-measure, then apply the home view authoritatively. */
+      map.invalidateSize();
+      setTimeout(() => { map.invalidateSize(); homeView(); }, 60);
+    }
+
+    function lockApp() { location.reload(); }   // cleanest way to scrub memory
+
+    /* ===================== searching / filtering ===================== */
+    function recordText(r) {
+      return Object.entries(r)
+        .filter(([k]) => k !== "lat" && k !== "lon")
+        .map(([k, v]) => k + ": " + normalizeValue(v))
+        .join(" | ")
+        .toLowerCase();
+    }
+
+    function matchesSearch(r) {
+      const q = state.search.trim().toLowerCase();
+      if (!q) return true;
+      if (q.startsWith("tag:")) {
+        const wanted = q.slice(4).trim();
+        if (!wanted) return true;
+        const tags = (r.tags || []).map(t => String(t).toLowerCase());
+        return wanted.split(/\s+/).every(w => tags.includes(w));
+      }
+      return recordText(r).includes(q);
+    }
+
+    function matchesTagSelection(r) {
+      const sel = [...state.tags];
+      if (!sel.length) return true;
+      const tags = (r.tags || []).map(t => String(t).toLowerCase());
+      return sel.every(t => tags.includes(t.toLowerCase()));
+    }
+
+    /* Filtered records, ALWAYS alphabetically sorted by name — independent of
+       the order in database.yaml and of any searches or tag filters. */
+    function activeRecords() {
+      return DATA.records
+        .filter(r => matchesSearch(r) && matchesTagSelection(r))
+        .sort(compareByName);
+    }
+
+    /* Records matching ONLY the search text — used to decide which tag chips
+       to display, so selected tags don't make their own chips vanish. */
+    function searchMatchedRecords() {
+      return DATA.records.filter(matchesSearch);
+    }
+
+    function anythingActive() {
+      return state.search.trim() !== "" || state.tags.size > 0;
+    }
+
+    /* ===================== tag chips ===================== */
+    function colorOf(tag) {
+      const map = DATA.tagColors || {};
+      return map[tag] || null;
+    }
+
+    function toggleTagFilter(tagLower) {
+      if (state.tags.has(tagLower)) state.tags.delete(tagLower);
+      else state.tags.add(tagLower);
+      update();
+    }
+
+    /* Tag list tracks the CURRENT SEARCH RESULTS: only tags carried by records
+       that match the search text are shown (with live counts). Chips for tags
+       that are already selected are always kept, so they can be un-ticked.
+
+       Ordering:
+       - COLLAPSED (default): the N visible chips are the MOST FREQUENT tags
+         (descending count; ties alphabetical). Rare tags are hidden behind
+         "Show all tags".
+       - EXPANDED: every tag, sorted ALPHABETICALLY.
+
+       Show/hide toggle: visible whenever the collapsed view would hide any
+         chip — expanded or not — so the list can always be collapsed back. */
+    function buildTagList() {
+      const matched = searchMatchedRecords();
+
+      const counts = new Map();
+      matched.forEach(r => (r.tags || []).forEach(t => {
+        const key = String(t);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }));
+
+      const alphabetical = [...counts.entries()].sort((a, b) => alphaCompare(a[0], b[0]));
+
+      const wrap = el("tag-list");
+      wrap.innerHTML = "";
+      const top = DATA.topTagsVisible ?? 10;
+
+      /* Selected chips are always shown; unselected ones fill the remaining slots */
+      const visible = alphabetical.filter(([tag]) => state.tags.has(tag.toLowerCase()));
+      const rest = alphabetical.filter(([tag]) => !state.tags.has(tag.toLowerCase()));
+      const maxCollapsed = Math.max(0, top - visible.length);   /* slots after selected chips */
+
+      let restShown;
+      if (state.allTagsShown) {
+        restShown = rest;                                        /* expanded: A->Z */
+      } else {
+        /* collapsed: most frequent first (ties alphabetical) */
+        const byCount = [...rest].sort((a, b) => b[1] - a[1] || alphaCompare(a[0], b[0]));
+        restShown = byCount.slice(0, maxCollapsed);
+      }
+      const shown = [...visible, ...restShown];
+
+      shown.forEach(([tag, cnt]) => {
+        const chip = document.createElement("button");
+        chip.className = "tag-chip";
+        const color = colorOf(tag);
+        if (color) {
+          chip.classList.add("chip-colored");
+          chip.style.setProperty("--tag-col", color);
+        }
+        if (state.tags.has(tag.toLowerCase())) chip.classList.add("chip-selected");
+
+        const label = document.createElement("span");
+        label.textContent = tag;
+        const count = document.createElement("span");
+        count.className = "cnt";
+        count.textContent = cnt;
+        chip.append(label, count);
+
+        chip.addEventListener("click", () => toggleTagFilter(tag.toLowerCase()));
+        wrap.appendChild(chip);
+      });
+
+      /* empty state when the search leaves no tags at all */
+      el("tag-empty").classList.toggle("hidden", counts.size > 0);
+
+      /* Toggle visibility: keep the toggle shown whenever the collapsed view
+         would hide ANY chip — expanded or not. This is what allows collapsing
+         back ("Show fewer tags") after expanding. */
+      const toggle = el("toggle-tags");
+      if (rest.length > maxCollapsed) {
+        toggle.classList.remove("hidden");
+        toggle.textContent = state.allTagsShown ? "Show fewer tags"
+          : `Show all tags (${counts.size})`;
+      } else {
+        toggle.classList.add("hidden");
+      }
+    }
+
+    /* ===================== cards ===================== */
+    const BASE_FIELD_KEYS = new Set(["name", "address", "website", "tags", "lat", "lon"]);
+
+    function miniTag(tag, clickable = false) {
+      const span = document.createElement("span");
+      span.className = "mini-tag";
+      const color = colorOf(tag);
+      if (color) {
+        span.classList.add("colored");
+        span.style.setProperty("--tag-col", color);
+      }
+      if (state.tags.has(String(tag).toLowerCase())) span.classList.add("selected");
+      span.textContent = tag;
+
+      /* Sidebar-card tags act as filter toggles; map-popup tags stay plain. */
+      if (clickable) {
+        span.classList.add("clickable");
+        span.title = "Filter by this tag";
+        span.addEventListener("click", e => {
+          e.stopPropagation();
+          toggleTagFilter(String(tag).toLowerCase());
+        });
+      }
+      return span;
+    }
+
+    function sortedTags(r) {
+      return [...(r.tags || [])].sort(alphaCompare);
+    }
+
+    function buildCard(r) {
+      const li = document.createElement("li");
+      li.className = "card";
+
+      const h = document.createElement("h3");
+      h.textContent = r.name ?? "(unnamed)";
+      li.appendChild(h);
+
+      if (r.address) {
+        const a = document.createElement("p");
+        a.className = "addr";
+        a.textContent = r.address;
+        li.appendChild(a);
+      }
+      if (r.lat == null || r.lon == null) {
+        const nm = document.createElement("p");
+        nm.className = "nomap";
+        nm.textContent = "no map location";
+        li.appendChild(nm);
+      }
+
+      const extra = Object.keys(r).filter(k => !BASE_FIELD_KEYS.has(k)).sort();
+      if (extra.length) {
+        const dl = document.createElement("dl");
+        dl.className = "fields";
+        extra.forEach(k => {
+          const dt = document.createElement("dt"); dt.textContent = k;
+          const dd = document.createElement("dd"); dd.textContent = normalizeValue(r[k]);
+          dl.append(dt, dd);
+        });
+        li.appendChild(dl);
+      }
+
+      if (r.website) {
+        const link = document.createElement("a");
+        link.href = r.website;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = r.website;
+        li.appendChild(link);
+      }
+
+      if ((r.tags || []).length) {
+        const row = document.createElement("div");
+        row.className = "tagrow";
+        sortedTags(r).forEach(t => row.appendChild(miniTag(t, true)));
+        li.appendChild(row);
+      }
+
+      if (r.lat != null && r.lon != null) {
+        const key = recordKey(r);
+        li.addEventListener("click", () => {
+          if (currentKey === key) {
+            setActive(null);                      /* click again = deselect */
+          } else {
+            focusRecord(r);
+            closeList();                          /* mobile: reveal the full map */
+          }
+        });
+      }
+      return li;
+    }
+
+    function renderCards(list) {
+      const wrap = el("result-list");
+      wrap.innerHTML = "";
+      cardsByKey.clear();
+      if (!list.length) {
+        const p = document.createElement("p");
+        p.className = "no-results";
+        p.textContent = "No records match the current search / tag filters.";
+        wrap.appendChild(p);
+        return;
+      }
+      list.forEach(r => {
+        const card = buildCard(r);
+        cardsByKey.set(recordKey(r), card);
+        wrap.appendChild(card);
+      });
+    }
+
+    /* ===================== map ===================== */
+    let map = null;
+    const markersByKey = new Map();        // recordKey -> {marker, record}
+    let currentKey = null;
+
+    function pinIcon(size, color, border) {
+      return L.divIcon({
+        className: "pin-icon", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50% 50% 50% 0;` +
+          `transform:rotate(-45deg);background:${color};border:${border}px solid #fff;` +
+          `box-shadow:0 1px 5px rgba(0,0,0,.5)"></div>`
+      });
+    }
+    const ICON_DEFAULT = () => pinIcon(PIN_SIZE, "#7b8cff", 2);
+    const ICON_ACTIVE = () => pinIcon(PIN_ACTIVE, "#e0565a", 3);
+
+    /* Tile providers: tried in order; after 8 consecutive failures the next
+       one is activated. Esri comes first because it works from file://
+       (no Referer restriction), which is required for double-clicking index.html. */
+    const TILE_PROVIDERS = [
+      {
+        url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        attr: "Tiles &copy; Esri", maxZoom: 19
+      },
+      {
+        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attr: "&copy; OpenStreetMap contributors", maxZoom: 19
+      }
+    ];
+
+    let currentLayer = null;
+
+    function attachTileLayer(index) {
+      const prov = TILE_PROVIDERS[index];
+      if (!prov) return;
+      if (currentLayer) map.removeLayer(currentLayer);
+      currentLayer = L.tileLayer(prov.url, { attribution: prov.attr, maxZoom: prov.maxZoom }).addTo(map);
+      let fails = 0;
+      currentLayer.on("tileerror", () => {
+        if (++fails >= 8 && index + 1 < TILE_PROVIDERS.length) attachTileLayer(index + 1);
+      });
+    }
+
+    function initMap() {
+      if (map) return;
+      map = L.map("map", {
+        center: [HOME.lat, HOME.lon], zoom: HOME.zoom,
+        zoomControl: false
+      });          /* default is top-left */
+      L.control.zoom({ position: "topright" }).addTo(map); /* ...moved to top-right */
+      attachTileLayer(0);
+    }
+
+    function homeView() {
+      map.setView([HOME.lat, HOME.lon], HOME.zoom);
+    }
+
+    function popupHtml(r) {
+      const div = document.createElement("div");
+      div.className = "popup";
+      const h = document.createElement("h4"); h.textContent = r.name ?? ""; div.appendChild(h);
+      if (r.address) {
+        const a = document.createElement("div"); a.className = "p-addr"; a.textContent = r.address;
+        div.appendChild(a);
+      }
+      if ((r.tags || []).length) {
+        const row = document.createElement("div"); row.className = "p-tags";
+        sortedTags(r).forEach(t => row.appendChild(miniTag(t, false)));
+        div.appendChild(row);
+      }
+      if (r.website) {
+        const a = document.createElement("a");
+        a.href = r.website; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = r.website;
+        div.appendChild(a);
+      }
+      return div;
+    }
+
+    function syncMarkers(list) {
+      const locatable = list.filter(r => r.lat != null && r.lon != null);
+      const activeKeys = new Set(locatable.map(recordKey));
+
+      markersByKey.forEach((entry, key) => {
+        if (!activeKeys.has(key) && map.hasLayer(entry.marker)) map.removeLayer(entry.marker);
+      });
+
+      locatable.forEach(r => {
+        const key = recordKey(r);
+        if (!markersByKey.has(key)) {
+          const marker = L.marker([r.lat, r.lon], { icon: ICON_DEFAULT() });
+          marker.bindPopup(popupHtml(r));
+          marker.on("click", () => setActive(currentKey === key ? null : key));
+          markersByKey.set(key, { marker, record: r });
+        }
+        const entry = markersByKey.get(key);
+        if (!map.hasLayer(entry.marker)) entry.marker.addTo(map);
+      });
+
+      /* Camera: home view when idle, fit-to-results only when filters are active. */
+      if (!anythingActive()) {
+        homeView();
+      } else if (locatable.length === 1) {
+        map.setView([locatable[0].lat, locatable[0].lon], Math.max(map.getZoom(), 10));
+      } else if (locatable.length > 1) {
+        map.fitBounds(L.latLngBounds(locatable.map(r => [r.lat, r.lon])).pad(0.15));
+      }
+    }
+
+    /* Scroll the selected record's card into view in the list and pulse it,
+       so picking a pin reveals the matching entry without manual scrolling.
+       On mobile the list is a hidden overlay — skip scrolling there, since the
+       user deliberately closed it. */
+    function revealCard(key) {
+      const card = cardsByKey.get(key);
+      if (!card) return;
+      if (currentLayout() === "mobile") return;
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      card.classList.remove("flash");
+      void card.offsetWidth;                    /* restart the CSS animation */
+      card.classList.add("flash");
+    }
+
+    function setActive(key) {
+      if (currentKey && markersByKey.has(currentKey)) {
+        markersByKey.get(currentKey).marker.setIcon(ICON_DEFAULT());
+      }
+      currentKey = key;
+      cardsByKey.forEach(c => c.classList.remove("active"));
+      if (!key) return;
+      const entry = markersByKey.get(key);
+      if (entry) entry.marker.setIcon(ICON_ACTIVE());
+      cardsByKey.get(key)?.classList.add("active");
+      revealCard(key);
+    }
+
+    function focusRecord(r) {
+      const key = recordKey(r);
+      setActive(key);
+      map.setView([r.lat, r.lon], Math.max(map.getZoom(), 13));
+      markersByKey.get(key)?.marker.openPopup();
+    }
+
+    /* ===================== central update ===================== */
+    function update() {
+      const list = activeRecords();
+      renderCards(list);
+      syncMarkers(list);
+
+      const total = DATA.records.length;
+      const onMap = list.filter(r => r.lat != null && r.lon != null).length;
+      const label = `${list.length} / ${total} shown · ${onMap} on map`;
+      el("result-count").textContent = label;
+      el("pill-count").textContent = label;   /* pill shows the same stats on mobile map view */
+
+      buildTagList();
+    }
+
+    /* ===================== wiring ===================== */
+    function initApp() {
+      el("search").addEventListener("input", e => { state.search = e.target.value; update(); });
+      el("lock-btn").addEventListener("click", lockApp);
+      el("toggle-tags").addEventListener("click", () => {
+        state.allTagsShown = !state.allTagsShown;
+        buildTagList();
+      });
+      update();
+    }
+
+    /* ---- wiring that exists before unlock: gate + layout ---- */
+    initLayout();
+    el("unlock-btn").addEventListener("click", unlock);
+    el("password").addEventListener("keydown", e => { if (e.key === "Enter") unlock(); });
+  </script>
+</body>
+
+</html>

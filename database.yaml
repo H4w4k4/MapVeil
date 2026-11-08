@@ -1,0 +1,156 @@
+# =============================================================================
+# MapVeil — sample database
+#
+# Copy this file to `database.yaml` and edit, or use it as a reference.
+# A record requires only a `name`; every other field is optional and
+# free-form (numbers, booleans, dates, lists and nested objects all work).
+#
+# All entries below are fictional.
+#
+# POSITION of each record is resolved in this priority order:
+#   1. manual `lat` + `lon`  -> used EXACTLY as given, geocoder never queried,
+#      never modified by the script. North/East positive, South/West negative.
+#   2. `geo_lat`/`geo_lon`/`geo_addr` -> cache written back by build.py
+#      (do not edit these; they are managed automatically and stripped from
+#      the encrypted payload)
+#   3. Photon geocoding of the `address` string (build-time, rate-limited)
+# =============================================================================
+
+settings:
+  # Colors for selected tags (any tag not listed here gets the default violet).
+  # Values are CSS colors — names, hex codes, rgb()/hsl() all work.
+  tag_colors:
+    Contact: '#7bd88f'        # green
+    Family: '#ffb86c'         # orange
+    Watchlist: '#e0565a'      # red
+    Service: '#53bddb'        # cyan
+    Landmark: '#c792ea'       # purple
+
+  # How many tags are visible in the (collapsed) filter panel before
+  # "Show all tags (N)" appears. Collapsed shows most-frequent first;
+  # expanded shows all tags alphabetically.
+  top_tags_visible: 3
+
+records:
+
+  # ---------------------------------------------------------------------------
+  # PEOPLE
+  # ---------------------------------------------------------------------------
+
+- name: Jane Doe
+  address: Hauptstrasse 12, 8000 Zurich, Switzerland
+  website: https://example.com
+  phone: +41 79 000 00 00
+  relation: friend
+  tags: [Contact]
+  geo_lat: 47.633521
+  geo_lon: 8.795853
+  geo_addr: Hauptstrasse 12, 8000 Zurich, Switzerland
+
+- name: Marc Dupont
+  address: Rue de la Loi 42, 1000 Brussels, Belgium
+  birthday: '1988-03-14'            # dates work as strings
+  skills: [carpentry, plumbing, electrical]
+  emergency_contact: true         # booleans display as yes/no
+  tags: [Contact, Service]
+  geo_lat: 50.842867
+  geo_lon: 4.380615
+  geo_addr: Rue de la Loi 42, 1000 Brussels, Belgium
+
+- name: Sofia Rossi
+  address: Via Roma 8, 20121 Milano, Italy
+  phone: +39 333 000 0000
+  notes: Met at the 2025 conference; prefers email over calls.
+  met_through: Jane Doe
+  tags: [Contact]
+  geo_lat: 45.469221
+  geo_lon: 9.190077
+  geo_addr: Via Roma 8, 20121 Milano, Italy
+
+- name: Grandma
+    # No address at all -> no map location; the card still ships.
+  visits_per_year: 12
+  favourite_cake: apple strudel
+  tags: [Family]
+
+  # ---------------------------------------------------------------------------
+  # PLACES
+  # ---------------------------------------------------------------------------
+
+- name: Alpine Cabin
+  address: Bettmeralp, 3992 Raron, Switzerland
+  booked_until: '2026-12-20'
+  sleeps: 6
+  has_wifi: false
+  tags: [Landmark]
+  geo_lat: 46.389438
+  geo_lon: 8.062903
+  geo_addr: Bettmeralp, 3992 Raron, Switzerland
+
+- name: Chania Lookout
+    # Manual coordinates: exact GPS fix, the geocoder is NEVER contacted for
+    # this record and the script never touches these values. The `address`
+    # line is free text — anything you want to see on the card.
+  address: 36°30'52"N 23°40'09"E
+  lat: 36.51444
+  lon: 23.66917
+  best_time: sunset
+  tags: [Landmark]
+
+- name: Shibuya Crossing
+    # Mixed setup is fine: this record uses manual coordinates, the others
+    # in the file are geocoded from their address.
+  address: Shibuya Station, Tokyo, Japan
+  lat: 35.65948
+  lon: 139.70055
+  visited: 3
+  tags: [Landmark]
+
+  # ---------------------------------------------------------------------------
+  # ORGANIZATIONS
+  # ---------------------------------------------------------------------------
+
+- name: Fake Logistics AG
+  address: Industriestrasse 100, 8400 Winterthur, Switzerland
+  website: https://fake-logistics.example
+  account_manager: Martina Huber
+  contract_end: '2027-06-30'
+  sla_hours: 24
+  tags: [Service, Watchlist]
+  geo_lat: 47.496496
+  geo_lon: 8.753877
+  geo_addr: Industriestrasse 100, 8400 Winterthur, Switzerland
+
+- name: Sample Parts GmbH
+  address: Musterweg 5, 3011 Bern, Switzerland
+  website: https://sample-parts.example
+  order_email: orders@sample-parts.example
+  minimum_order_chf: 250
+  ships_to: [CH, EU]
+  tags: [Service]
+  geo_lat: 46.948595
+  geo_lon: 7.446706
+  geo_addr: Musterweg 5, 3011 Bern, Switzerland
+
+- name: Vertex Consulting
+  address: 221B Example Street, London, United Kingdom
+  website: https://vertex-consulting.example
+  hourly_rate: 140
+  active_contract: true
+  contacts_primary: Lee Wong
+  contacts_backup: Ada Page
+  tags: [Contact]
+  geo_lat: 51.523763
+  geo_lon: -0.158474
+  geo_addr: 221B Example Street, London, United Kingdom
+
+  # ---------------------------------------------------------------------------
+  # EDGE CASE
+  # ---------------------------------------------------------------------------
+
+- name: Fictional Nomad Office
+    # Intentionally unresolvable: exercises the "no map location" path
+    # without crashing the build.
+  address: 999 Nonexistent Street, Nowhereville
+  notes: Verify address with Marc.
+  tags: [Watchlist]
