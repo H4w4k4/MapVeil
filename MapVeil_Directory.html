@@ -21,6 +21,7 @@
   * Colors / fonts .............. the :root CSS variables below
   * Pin size .................... PIN_SIZE / PIN_ACTIVE constants below
   * Layout breakpoint ........... LAYOUT_BREAKPOINT (px) below
+  * Tag chip cycle window ....... TAG_EXCLUDE_WINDOW_MS below
   * Everything else (tag colors, size of the tag list) comes from
     database.yaml -> settings and needs no code change.
 
@@ -238,18 +239,16 @@
       margin-top: 12px;
     }
 
+    /* Help text lives in the title attribute: shown as a tooltip on hover
+       (native delay, like the tag-chip help), keeping the field itself clean. */
     #search {
       width: 100%;
-      padding: 9px 66px 9px 34px;
+      padding: 9px 12px 9px 34px;
       font-size: 14px;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: var(--bg);
       color: var(--text);
-    }
-
-    #search::placeholder {
-      color: var(--text-dim);
     }
 
     #search:focus {
@@ -266,19 +265,6 @@
       color: var(--text-dim);
       pointer-events: none;
       font-size: 13px;
-    }
-
-    .search-hint {
-      position: absolute;
-      right: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 11px;
-      color: var(--text-dim);
-      background: var(--chip-bg);
-      padding: 2px 6px;
-      border-radius: 4px;
-      pointer-events: none;
     }
 
     /* ---------------- tags ---------------- */
@@ -352,6 +338,27 @@
     .tag-chip.chip-selected .cnt {
       color: #fff;
       opacity: .8;
+    }
+
+    /* Excluded (= NOT tag) chips: DARKER than normal. Visual language:
+       darker = excluded, normal = not selected, bright/filled = selected.
+       Colored tags keep their hue but strongly darkened; uncolored tags
+       fall back to a dark gray tone. */
+    .tag-chip.chip-excluded {
+      border-color: var(--border);
+      color: var(--text-dim);
+      background: var(--bg);
+    }
+
+    .tag-chip.chip-colored.chip-excluded {
+      border-color: color-mix(in srgb, var(--tag-col) 45%, black);
+      color: color-mix(in srgb, var(--tag-col) 45%, black);
+      background: color-mix(in srgb, var(--tag-col) 7%, var(--bg));
+    }
+
+    .tag-chip.chip-excluded .cnt {
+      color: inherit;
+      opacity: .7;
     }
 
     #toggle-tags {
@@ -474,6 +481,20 @@
       background: var(--tag-col, var(--accent));
       border-color: var(--tag-col, var(--accent));
       color: #fff;
+    }
+
+    /* Excluded mini-tags: darker than normal (same language as the chips). */
+    .mini-tag.excluded {
+      border-color: var(--border);
+      color: var(--text-dim);
+      background: var(--bg);
+      text-decoration: line-through;
+    }
+
+    .mini-tag.colored.excluded {
+      border-color: color-mix(in srgb, var(--tag-col) 45%, black);
+      color: color-mix(in srgb, var(--tag-col) 45%, black);
+      background: color-mix(in srgb, var(--tag-col) 7%, var(--bg));
     }
 
     .mini-tag.clickable {
@@ -671,7 +692,7 @@
     <div class="gate-box">
       <h1>MapVeil</h1>
       <p class="gate-sub">Enter the master password to unlock the directory.</p>
-      <input type="password" id="password" autocomplete="off" placeholder="Password">
+      <input type="password" id="password" autocomplete="off" placeholder="Password" autofocus>
       <button id="unlock-btn">Unlock</button>
       <div id="unlock-error" role="alert"></div>
       <!-- EDIT LINK HERE: change the href below (and optionally the label text) -->
@@ -696,13 +717,12 @@
           </div>
           <div class="search-wrap">
             <span class="search-icon">&#128269;</span>
-            <input id="search" type="text" autocomplete="off" placeholder='Search all fields — or "tag: PCB"'>
-            <span class="search-hint">all fields</span>
+            <input id="search" type="text" autocomplete="off"
+              title='Search all fields — or "tag: PCB" (partial match ok)'>
           </div>
         </div>
 
         <div class="tags-panel">
-          <div class="tags-title">Filter by tag</div>
           <div id="tag-list"></div>
           <div id="tag-empty" class="hidden">No tags in the current search results.</div>
           <button id="toggle-tags" class="hidden"></button>
@@ -746,6 +766,14 @@
     const LAYOUT_BREAKPOINT = 760;          /* px — below this, default = mobile */
     const LAYOUT_KEY = "mapveil-layout";    /* localStorage key for the user's choice */
 
+    /* ===================== tag chip behaviour (customize here) =====================
+       Chips cycle through three states on click:
+         1. click          -> SELECT the tag (records must have it)
+         2. 2nd click within TAG_EXCLUDE_WINDOW_MS -> EXCLUDE it (NOT tag)
+         3. next click     -> back to neutral
+       A 2nd click AFTER the time window simply deselects the tag again. */
+    const TAG_EXCLUDE_WINDOW_MS = 2000;
+
     /* ===================== helpers ===================== */
     const el = id => document.getElementById(id);
 
@@ -777,7 +805,8 @@
 
     /* ===================== state ===================== */
     let DATA = null;                       // {tagColors, topTagsVisible, records}
-    const state = { search: "", tags: new Set(), allTagsShown: false };
+    const state = { search: "", tags: new Set(), excluded: new Set(), allTagsShown: false };
+    const tagSelectedAt = new Map();       // tag (lowercase) -> ms when it was selected
     const cardsByKey = new Map();          // recordKey -> rendered <li>
 
     /* ===================== layout switch (desktop / mobile) =====================
@@ -872,16 +901,24 @@
         const wanted = q.slice(4).trim();
         if (!wanted) return true;
         const tags = (r.tags || []).map(t => String(t).toLowerCase());
-        return wanted.split(/\s+/).every(w => tags.includes(w));
+        /* Partial match: every space-separated word must occur inside
+           (at least one of) the record's tags — e.g. "tag: sup" finds
+           records tagged "Supplier". */
+        return wanted.split(/\s+/).every(w => tags.some(t => t.includes(w)));
       }
       return recordText(r).includes(q);
     }
 
+    /* A record matches when it carries ALL selected tags and NONE of the
+       excluded (NOT-tag) ones. Both sets are optional. */
     function matchesTagSelection(r) {
       const sel = [...state.tags];
-      if (!sel.length) return true;
+      const exc = [...state.excluded];
+      if (!sel.length && !exc.length) return true;
       const tags = (r.tags || []).map(t => String(t).toLowerCase());
-      return sel.every(t => tags.includes(t.toLowerCase()));
+      if (exc.some(t => tags.includes(t))) return false;
+      if (!sel.length) return true;
+      return sel.every(t => tags.includes(t));
     }
 
     /* Filtered records, ALWAYS alphabetically sorted by name — independent of
@@ -899,7 +936,7 @@
     }
 
     function anythingActive() {
-      return state.search.trim() !== "" || state.tags.size > 0;
+      return state.search.trim() !== "" || state.tags.size > 0 || state.excluded.size > 0;
     }
 
     /* ===================== tag chips ===================== */
@@ -908,15 +945,32 @@
       return map[tag] || null;
     }
 
+    /* Three-state chip cycle: select -> (quick 2nd click) exclude -> neutral.
+       The exclude state is only reachable via a SECOND click within
+       TAG_EXCLUDE_WINDOW_MS of the moment the tag was selected; a later
+       click just deselects. While excluded, any click returns to neutral. */
     function toggleTagFilter(tagLower) {
-      if (state.tags.has(tagLower)) state.tags.delete(tagLower);
-      else state.tags.add(tagLower);
+      const now = Date.now();
+      if (state.excluded.has(tagLower)) {
+        state.excluded.delete(tagLower);                 /* 3rd click: back to neutral */
+      } else if (state.tags.has(tagLower)) {
+        const selectedAt = tagSelectedAt.get(tagLower) ?? 0;
+        state.tags.delete(tagLower);
+        tagSelectedAt.delete(tagLower);
+        if (now - selectedAt <= TAG_EXCLUDE_WINDOW_MS) {
+          state.excluded.add(tagLower);                  /* quick 2nd click: NOT(tag) */
+        }
+      } else {
+        state.tags.add(tagLower);                        /* 1st click: select */
+        tagSelectedAt.set(tagLower, now);
+      }
       update();
     }
 
     /* Tag list tracks the CURRENT SEARCH RESULTS: only tags carried by records
        that match the search text are shown (with live counts). Chips for tags
-       that are already selected are always kept, so they can be un-ticked.
+       that are already selected OR excluded are always kept, so they can be
+       un-ticked / un-excluded.
 
        Ordering:
        - COLLAPSED (default): the N visible chips are the MOST FREQUENT tags
@@ -941,10 +995,11 @@
       wrap.innerHTML = "";
       const top = DATA.topTagsVisible ?? 10;
 
-      /* Selected chips are always shown; unselected ones fill the remaining slots */
-      const visible = alphabetical.filter(([tag]) => state.tags.has(tag.toLowerCase()));
-      const rest = alphabetical.filter(([tag]) => !state.tags.has(tag.toLowerCase()));
-      const maxCollapsed = Math.max(0, top - visible.length);   /* slots after selected chips */
+      /* Selected/excluded chips are always shown; unpinned ones fill the rest */
+      const pinned = tag => state.tags.has(tag.toLowerCase()) || state.excluded.has(tag.toLowerCase());
+      const visible = alphabetical.filter(([tag]) => pinned(tag));
+      const rest = alphabetical.filter(([tag]) => !pinned(tag));
+      const maxCollapsed = Math.max(0, top - visible.length);   /* slots after pinned chips */
 
       let restShown;
       if (state.allTagsShown) {
@@ -964,7 +1019,9 @@
           chip.classList.add("chip-colored");
           chip.style.setProperty("--tag-col", color);
         }
-        if (state.tags.has(tag.toLowerCase())) chip.classList.add("chip-selected");
+        const lower = tag.toLowerCase();
+        if (state.excluded.has(lower)) chip.classList.add("chip-excluded");
+        else if (state.tags.has(lower)) chip.classList.add("chip-selected");
 
         const label = document.createElement("span");
         label.textContent = tag;
@@ -973,7 +1030,8 @@
         count.textContent = cnt;
         chip.append(label, count);
 
-        chip.addEventListener("click", () => toggleTagFilter(tag.toLowerCase()));
+        chip.title = "Click: filter by tag · quick 2nd click (<2 s): exclude tag · again: reset";
+        chip.addEventListener("click", () => toggleTagFilter(lower));
         wrap.appendChild(chip);
       });
 
@@ -1004,13 +1062,15 @@
         span.classList.add("colored");
         span.style.setProperty("--tag-col", color);
       }
-      if (state.tags.has(String(tag).toLowerCase())) span.classList.add("selected");
+      const lower = String(tag).toLowerCase();
+      if (state.excluded.has(lower)) span.classList.add("excluded");
+      else if (state.tags.has(lower)) span.classList.add("selected");
       span.textContent = tag;
 
       /* Sidebar-card tags act as filter toggles; map-popup tags stay plain. */
       if (clickable) {
         span.classList.add("clickable");
-        span.title = "Filter by this tag";
+        span.title = "Click: filter by tag · quick 2nd click (<2 s): exclude tag · again: reset";
         span.addEventListener("click", e => {
           e.stopPropagation();
           toggleTagFilter(String(tag).toLowerCase());
@@ -1155,6 +1215,16 @@
       });          /* default is top-left */
       L.control.zoom({ position: "topright" }).addTo(map); /* ...moved to top-right */
       attachTileLayer(0);
+
+      /* Clicking anywhere else on the map deselects the pin and closes its
+         info bubble. Clicks inside an open popup bubble up to the map too,
+         so ignore those (e.g. selecting text in the bubble must keep it). */
+      map.on("click", e => {
+        if (e.originalEvent?.target instanceof Element
+          && e.originalEvent.target.closest(".leaflet-popup")) return;
+        map.closePopup();
+        setActive(null);
+      });
     }
 
     function homeView() {
@@ -1186,6 +1256,10 @@
     function syncMarkers(list) {
       const locatable = list.filter(r => r.lat != null && r.lon != null);
       const activeKeys = new Set(locatable.map(recordKey));
+
+      /* A filter change can make the selected record vanish: deselect it so
+         no pin stays red and no popup survives for a hidden record. */
+      if (currentKey && !activeKeys.has(currentKey)) setActive(null);
 
       markersByKey.forEach((entry, key) => {
         if (!activeKeys.has(key) && map.hasLayer(entry.marker)) map.removeLayer(entry.marker);
@@ -1262,9 +1336,30 @@
       buildTagList();
     }
 
+    /* ===================== full reset =====================
+       Enter on an EMPTY search bar: clear the search, all tag selections and
+       exclusions, close the open pin info bubble, and deselect the active
+       pin / entry. */
+    function resetFilters() {
+      state.search = "";
+      el("search").value = "";
+      state.tags.clear();
+      state.excluded.clear();
+      tagSelectedAt.clear();
+      if (map) map.closePopup();              /* close the open info bubble */
+      setActive(null);
+      update();
+    }
+
     /* ===================== wiring ===================== */
     function initApp() {
       el("search").addEventListener("input", e => { state.search = e.target.value; update(); });
+      el("search").addEventListener("keydown", e => {
+        if (e.key === "Enter" && el("search").value.trim() === "") {
+          e.preventDefault();
+          resetFilters();
+        }
+      });
       el("lock-btn").addEventListener("click", lockApp);
       el("toggle-tags").addEventListener("click", () => {
         state.allTagsShown = !state.allTagsShown;
