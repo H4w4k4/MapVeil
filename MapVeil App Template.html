@@ -31,7 +31,7 @@
   ============================================================================
 -->
   <title>MapVeil</title>
- <link rel="icon" href="data:image/svg+xml,
+  <link rel="icon" href="data:image/svg+xml,
  <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
   <clipPath id='c'>
     <circle cx='32' cy='32' r='28'/></clipPath>
@@ -41,7 +41,7 @@
     <ellipse cx='32' cy='32' rx='28' ry='12'/>
     <line x1='6.5' y1='21' x2='57.5' y2='21'/>
     <line x1='6.5' y1='43' x2='57.5' y2='43'/></g></svg>">
- <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
     integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -463,6 +463,13 @@
       gap: 5px;
     }
 
+    .card .linkrow {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 14px;
+    }
+
     .mini-tag {
       font-size: 11px;
       padding: 2px 8px;
@@ -582,9 +589,34 @@
       padding: 1px 7px;
     }
 
+    .popup .linkrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px 14px;
+      margin-bottom: 6px;
+    }
+
     .popup a {
       font-size: 12px;
       color: var(--accent);
+    }
+
+    /* Hover tooltip on pins: only the entry name, no delay. Same look as
+       the popup bubble (panel background, border, same font). */
+    .leaflet-tooltip.pin-tip {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .4);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 4px 10px;
+    }
+
+    .leaflet-tooltip.pin-tip::before {
+      border-top-color: var(--border);   /* arrow outline matches the border */
     }
 
     /* Floating "open list" pill (mobile, list closed) — also carries the
@@ -787,6 +819,13 @@
       if (Array.isArray(v)) return v.map(normalizeValue).join("; ");
       if (v && typeof v === "object") return JSON.stringify(v);
       return String(v);
+    }
+
+    /* True when a (normalized) value is a plain http(s) URL — such values are
+       rendered as clickable links whose text is the YAML key name, not the
+       URL itself (keeps cards and popups compact). */
+    function isHttpUrl(s) {
+      return typeof s === "string" && /^https?:\/\/\S+$/i.test(s.trim());
     }
 
     function recordKey(r) { return (r.lat ?? "") + "," + (r.lon ?? "") + "|" + (r.name ?? ""); }
@@ -1051,6 +1090,17 @@
     /* ===================== cards ===================== */
     const BASE_FIELD_KEYS = new Set(["name", "address", "website", "tags", "lat", "lon"]);
 
+    /* Clickable <a> for a URL value; the visible text is the YAML key name
+       instead of the full URL (hover shows the target via the browser). */
+    function linkField(key, url) {
+      const a = document.createElement("a");
+      a.href = url.trim();
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = key;
+      return a;
+    }
+
     function miniTag(tag, clickable = false) {
       const span = document.createElement("span");
       span.className = "mini-tag";
@@ -1101,11 +1151,21 @@
         li.appendChild(nm);
       }
 
-      const extra = Object.keys(r).filter(k => !BASE_FIELD_KEYS.has(k)).sort();
-      if (extra.length) {
+            const extra = Object.keys(r).filter(k => !BASE_FIELD_KEYS.has(k)).sort();
+
+      /* URL-valued fields + website all live on ONE link row; website first. */
+      const links = [];
+      if (r.website) links.push(linkField("website", r.website));
+      extra.forEach(k => {
+        const val = normalizeValue(r[k]);
+        if (isHttpUrl(val)) links.push(linkField(k, val));
+      });
+
+      const textExtras = extra.filter(k => !isHttpUrl(normalizeValue(r[k])));
+      if (textExtras.length) {
         const dl = document.createElement("dl");
         dl.className = "fields";
-        extra.forEach(k => {
+        textExtras.forEach(k => {
           const dt = document.createElement("dt"); dt.textContent = k;
           const dd = document.createElement("dd"); dd.textContent = normalizeValue(r[k]);
           dl.append(dt, dd);
@@ -1113,13 +1173,11 @@
         li.appendChild(dl);
       }
 
-      if (r.website) {
-        const link = document.createElement("a");
-        link.href = r.website;
-        link.target = "_blank";
-        link.rel = "noopener";
-        link.textContent = r.website;
-        li.appendChild(link);
+      if (links.length) {
+        const row = document.createElement("div");
+        row.className = "linkrow";
+        links.forEach(a => row.appendChild(a));
+        li.appendChild(row);
       }
 
       if ((r.tags || []).length) {
@@ -1222,6 +1280,14 @@
         map.closePopup();
         setActive(null);
       });
+            /* Rebuild the popup content on every open so the tag chips inside
+         always reflect the CURRENT select/exclude state (popups are bound
+         to the marker once, but their HTML would otherwise go stale). */
+      map.on("popupopen", e => {
+        const found = [...markersByKey.entries()]
+          .find(([, m]) => m.marker === e.popup._source);
+        if (found) e.popup.setContent(popupHtml(found[1].record));
+      });
     }
 
     function homeView() {
@@ -1236,16 +1302,24 @@
         const a = document.createElement("div"); a.className = "p-addr"; a.textContent = r.address;
         div.appendChild(a);
       }
-      if ((r.tags || []).length) {
-        const row = document.createElement("div"); row.className = "p-tags";
-        sortedTags(r).forEach(t => row.appendChild(miniTag(t, false)));
+      /* Links on ONE line, directly ABOVE the tag row (tags stay at the bottom) */
+      const extra = Object.keys(r).filter(k => !BASE_FIELD_KEYS.has(k)).sort();
+      const links = [];
+      if (r.website) links.push(linkField("website", r.website));
+      extra.forEach(k => {
+        const val = normalizeValue(r[k]);
+        if (isHttpUrl(val)) links.push(linkField(k, val));
+      });
+      if (links.length) {
+        const row = document.createElement("div");
+        row.className = "linkrow";
+        links.forEach(a => row.appendChild(a));
         div.appendChild(row);
       }
-      if (r.website) {
-        const a = document.createElement("a");
-        a.href = r.website; a.target = "_blank"; a.rel = "noopener";
-        a.textContent = r.website;
-        div.appendChild(a);
+      if ((r.tags || []).length) {
+        const row = document.createElement("div"); row.className = "p-tags";
+        sortedTags(r).forEach(t => row.appendChild(miniTag(t, true)));
+        div.appendChild(row);
       }
       return div;
     }
@@ -1267,6 +1341,7 @@
         if (!markersByKey.has(key)) {
           const marker = L.marker([r.lat, r.lon], { icon: ICON_DEFAULT() });
           marker.bindPopup(popupHtml(r));
+          marker.bindTooltip(r.name ?? "", { className: "pin-tip", direction: "top", offset: [0, -PIN_ACTIVE / 2 - 2] });
           marker.on("click", () => setActive(currentKey === key ? null : key));
           markersByKey.set(key, { marker, record: r });
         }
