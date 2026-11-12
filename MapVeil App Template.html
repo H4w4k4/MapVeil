@@ -724,8 +724,8 @@
     <div class="gate-box">
       <h1>MapVeil</h1>
       <p class="gate-sub">Enter the master password to unlock the directory.</p>
-      <input type="password" id="password" autocomplete="off" placeholder="Password" autofocus>
-      <button id="unlock-btn">Unlock</button>
+      <input type="password" id="password" autocomplete="off" placeholder="Password" aria-label="Password" autofocus>
+      <button id="unlock-btn" type="button">Unlock</button>
       <div id="unlock-error" role="alert"></div>
       <!-- EDIT LINK HERE: change the href below (and optionally the label text) -->
       <p class="powered-by">
@@ -742,14 +742,14 @@
           <div class="brand-row">
             <div class="brand">Directory</div>
             <div style="display:flex; gap:6px;">
-              <button id="close-list-btn" class="head-btn" title="Close list, show map">✕</button>
-              <button id="layout-btn" class="head-btn" title="Toggle mobile / desktop layout">🖥</button>
-              <button id="lock-btn" class="head-btn">Lock</button>
+              <button id="close-list-btn" class="head-btn" type="button" title="Close list, show map">✕</button>
+              <button id="layout-btn" class="head-btn" type="button" title="Toggle mobile / desktop layout">🖥</button>
+              <button id="lock-btn" class="head-btn" type="button">Lock</button>
             </div>
           </div>
           <div class="search-wrap">
             <span class="search-icon">&#128269;</span>
-            <input id="search" type="text" autocomplete="off"
+            <input id="search" type="text" autocomplete="off" aria-label="Search"
               title='Search all fields — or "tag: PCB" (partial match ok)'>
           </div>
         </div>
@@ -757,7 +757,7 @@
         <div class="tags-panel">
           <div id="tag-list"></div>
           <div id="tag-empty" class="hidden">No tags in the current search results.</div>
-          <button id="toggle-tags" class="hidden"></button>
+          <button id="toggle-tags" class="hidden" type="button" aria-label="Show all tags"></button>
         </div>
 
         <ul id="result-list"></ul>
@@ -765,7 +765,7 @@
 
       <div id="mapwrap">
         <div id="map"></div>
-        <button id="show-list">☰ List <span id="pill-count"></span></button>
+        <button id="show-list" type="button">☰ List <span id="pill-count"></span></button>
         <div id="app-footer">
           <span id="result-count"></span>
         </div>
