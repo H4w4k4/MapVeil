@@ -1434,6 +1434,9 @@
       state.tags.clear();
       state.excluded.clear();
       tagSelectedAt.clear();
+      /* restore the YAML default tag status (select/exclude) */
+      (DATA.tagSelect || []).forEach(t => state.tags.add(String(t).toLowerCase()));
+      (DATA.tagExclude || []).forEach(t => state.excluded.add(String(t).toLowerCase()));
       if (map) map.closePopup();              /* close the open info bubble */
       setActive(null);
       update();
@@ -1453,6 +1456,9 @@
         state.allTagsShown = !state.allTagsShown;
         buildTagList();
       });
+      /* YAML default filters: pre-select / pre-exclude tags at startup. */
+      (DATA.tagSelect || []).forEach(t => state.tags.add(String(t).toLowerCase()));
+      (DATA.tagExclude || []).forEach(t => state.excluded.add(String(t).toLowerCase()));
       update();
     }
 

@@ -25,6 +25,9 @@ settings:
     Watchlist: '#e0565a'      # red
     Service: '#53bddb'        # cyan
     Landmark: '#c792ea'       # purple
+  # default tag setting
+  tag_select: []              # exemple tag_select: [Contact, Landmark]
+  tag_exclude: []
   # Home position of the map, will not be encrypted
   home:
     lat: 46.82

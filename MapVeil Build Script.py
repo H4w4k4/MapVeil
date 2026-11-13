@@ -455,9 +455,19 @@ def main():
     if getpass.getpass("Confirm master password: ") != password:
         sys.exit("ERROR: passwords do not match.")
 
+    _settings = doc.get("settings") or {}
+
+    def _tag_list(name):
+        v = _settings.get(name) or []
+        if isinstance(v, str):            # tolerate a single scalar value
+            v = [v]
+        return [str(t).strip().lower() for t in v if str(t).strip()]
+    
     payload = {
         "tagColors": tag_colors,
         "topTagsVisible": top_tags_visible,
+        "tagSelect": _tag_list("tag_select"),
+        "tagExclude": _tag_list("tag_exclude"),
         "records": records,
     }
     payload_b64 = encrypt_payload(
