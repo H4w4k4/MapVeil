@@ -70,6 +70,7 @@ from geopy.geocoders import Photon
 
 try:
     from ruamel.yaml import YAML as RuamelYAML
+
     HAVE_RUAMEL = True
 except ImportError:
     HAVE_RUAMEL = False
@@ -83,10 +84,10 @@ OUTPUT_PATH = BASE_DIR / "MapVeil_Directory.html"
 # JavaScript slot where the base64 chunks are joined. Never spell it out
 # in comments: str.replace() would inject the ciphertext there too.
 PAYLOAD_MARKER = "__PAYLOAD_LINES__"
-GEO_DELAY = 1.1                            # seconds between Photon requests
+GEO_DELAY = 1.1  # seconds between Photon requests
 
-COORD_KEYS = ("lat", "lon")                            # user-fixed coordinates
-CACHE_LAT, CACHE_LON, CACHE_ADDR = "geo_lat", "geo_lon", "geo_addr"   # geocoder cache
+COORD_KEYS = ("lat", "lon")  # user-fixed coordinates
+CACHE_LAT, CACHE_LON, CACHE_ADDR = "geo_lat", "geo_lon", "geo_addr"  # geocoder cache
 CACHE_KEYS = (CACHE_LAT, CACHE_LON, CACHE_ADDR)
 
 # Quoted base64 payload chunks (>= 64 chars of the base64 alphabet).
@@ -100,10 +101,11 @@ B64_CHUNK_RE = re.compile(r'"[A-Za-z0-9+/]{64,}={0,2}"')
 # YAML I/O (round-trip via ruamel if available, else PyYAML)
 # --------------------------------------------------------------------------- #
 
+
 def load_yaml_doc(text):
     """Parse YAML text, returning (document, backend_name)."""
     if HAVE_RUAMEL:
-        yml = RuamelYAML(typ="rt")             # round-trip: keeps comments
+        yml = RuamelYAML(typ="rt")  # round-trip: keeps comments
         return yml.load(text), "ruamel"
     return yaml.safe_load(text), "pyyaml"
 
@@ -124,23 +126,30 @@ def dump_yaml_doc(doc, backend):
 # 1. Load data
 # --------------------------------------------------------------------------- #
 
+
 def _check_coord_pair(rec, name, k1, k2, label, problems):
     """Validate that k1/k2 are either both absent or both numbers in range."""
     has1 = rec.get(k1) is not None
     has2 = rec.get(k2) is not None
     if has1 != has2:
-        problems.append(f"record '{name}': '{k1}' and '{k2}' must be given together "
-                        f"(got {'only ' + k1 if has1 else 'only ' + k2})")
+        problems.append(
+            f"record '{name}': '{k1}' and '{k2}' must be given together "
+            f"(got {'only ' + k1 if has1 else 'only ' + k2})"
+        )
         return
     if not has1:
         return
     v1, v2 = rec[k1], rec[k2]
     if not isinstance(v1, (int, float)) or not isinstance(v2, (int, float)):
-        problems.append(f"record '{name}': '{label}' coordinates must be decimal numbers "
-                        f"(got {v1!r}, {v2!r})")
+        problems.append(
+            f"record '{name}': '{label}' coordinates must be decimal numbers "
+            f"(got {v1!r}, {v2!r})"
+        )
     elif not (-90 <= v1 <= 90) or not (-180 <= v2 <= 180):
-        problems.append(f"record '{name}': '{label}' coordinates out of range "
-                        f"(valid: lat -90..90, lon -180..180)")
+        problems.append(
+            f"record '{name}': '{label}' coordinates out of range "
+            f"(valid: lat -90..90, lon -180..180)"
+        )
 
 
 def load_data():
@@ -149,18 +158,24 @@ def load_data():
     try:
         text = YAML_PATH.read_text(encoding="utf-8")
     except FileNotFoundError:
-        sys.exit(f"ERROR: {YAML_PATH.name} not found. YAML is the only supported source format.")
+        sys.exit(
+            f"ERROR: {YAML_PATH.name} not found. YAML is the only supported source format."
+        )
 
     doc, backend = load_yaml_doc(text)
 
     if backend == "pyyaml":
-        print("WARNING: ruamel.yaml is not installed — comments and formatting in "
-              "database.yaml will be lost when the geocoder writes back coordinates.")
+        print(
+            "WARNING: ruamel.yaml is not installed — comments and formatting in "
+            "database.yaml will be lost when the geocoder writes back coordinates."
+        )
         print("         Recommended: pip install ruamel.yaml")
 
     records_raw = doc.get("records") if isinstance(doc, dict) else None
     if not isinstance(records_raw, list) or not records_raw:
-        sys.exit("ERROR: database.yaml must contain a non-empty top-level 'records:' list.")
+        sys.exit(
+            "ERROR: database.yaml must contain a non-empty top-level 'records:' list."
+        )
 
     settings = doc.get("settings") or {}
     tag_colors = settings.get("tag_colors") or {}
@@ -191,6 +206,7 @@ def load_data():
 # 2. Positioning (manual > cache > geocoder)
 # --------------------------------------------------------------------------- #
 
+
 def ask_use_cache():
     """Startup prompt: reuse previously queried coordinates or start fresh?"""
     print("Coordinate lookup mode:")
@@ -220,15 +236,18 @@ def position_records(records, use_cache):
     manual_n = sum(1 for r in records if r.get("lat") is not None)
     pool = [r for r in records if r.get("lat") is None]
     reusable = sum(
-        1 for r in pool
+        1
+        for r in pool
         if use_cache
         and isinstance(r.get(CACHE_LAT), (int, float))
         and str(r.get(CACHE_ADDR) or "").strip() == str(r.get("address") or "").strip()
         and str(r.get("address") or "").strip() != ""
     )
-    print(f"[2/5] Positioning records: {manual_n} manual, {reusable} cached"
-          f"{' (reusing)' if use_cache else ' (IGNORED — fresh query)'}, "
-          f"{len(pool) - reusable} to geocode at {GEO_DELAY}s/request...")
+    print(
+        f"[2/5] Positioning records: {manual_n} manual, {reusable} cached"
+        f"{' (reusing)' if use_cache else ' (IGNORED — fresh query)'}, "
+        f"{len(pool) - reusable} to geocode at {GEO_DELAY}s/request..."
+    )
 
     geocode = RateLimiter(
         Photon(user_agent="mapveil-builder", timeout=10).geocode,
@@ -244,17 +263,21 @@ def position_records(records, use_cache):
 
         # 1. Manual coordinates: authoritative — never touched, never deleted.
         if rec.get("lat") is not None:
-            rec["lat"], rec["lon"] = round(float(rec["lat"]), 6), round(float(rec["lon"]), 6)
+            rec["lat"], rec["lon"] = round(float(rec["lat"]), 6), round(
+                float(rec["lon"]), 6
+            )
             print(f"  -> {name}: manual ({rec['lat']}, {rec['lon']})")
             continue
 
         address = str(rec.get("address") or "").strip()
 
         # 2. Cached coordinates from a previous run (same address only).
-        if (use_cache
-                and isinstance(rec.get(CACHE_LAT), (int, float))
-                and address != ""
-                and address == str(rec.get(CACHE_ADDR) or "").strip()):
+        if (
+            use_cache
+            and isinstance(rec.get(CACHE_LAT), (int, float))
+            and address != ""
+            and address == str(rec.get(CACHE_ADDR) or "").strip()
+        ):
             rec["lat"] = round(float(rec[CACHE_LAT]), 6)
             rec["lon"] = round(float(rec[CACHE_LON]), 6)
             reused += 1
@@ -280,7 +303,11 @@ def position_records(records, use_cache):
             rec["lon"] = round(location.longitude, 6)
             # Update the cache — keyed to THIS address, so a later edit of
             # the address invalidates it automatically.
-            rec[CACHE_LAT], rec[CACHE_LON], rec[CACHE_ADDR] = rec["lat"], rec["lon"], address
+            rec[CACHE_LAT], rec[CACHE_LON], rec[CACHE_ADDR] = (
+                rec["lat"],
+                rec["lon"],
+                address,
+            )
             located += 1
             print(f"  -> {name}: geocoded ({rec['lat']}, {rec['lon']})")
         else:
@@ -289,8 +316,10 @@ def position_records(records, use_cache):
             # for future runs once the geocoder recovers.
             failed.append((name, "address not found"))
 
-    print(f"  -> {located} geocoded, {reused} reused from cache, "
-          f"{manual_n} manual, {len(failed)} without coordinates")
+    print(
+        f"  -> {located} geocoded, {reused} reused from cache, "
+        f"{manual_n} manual, {len(failed)} without coordinates"
+    )
     return failed
 
 
@@ -302,7 +331,7 @@ def write_back_cache(doc, records, backend):
     for raw_rec, rec in zip(raw_records, records):
         for key in CACHE_KEYS:
             try:
-                raw_rec.pop(key, None)         # remove stale cache first
+                raw_rec.pop(key, None)  # remove stale cache first
             except (KeyError, AttributeError):
                 pass
         if rec.get(CACHE_LAT) is not None:
@@ -311,23 +340,29 @@ def write_back_cache(doc, records, backend):
             raw_rec[CACHE_ADDR] = rec[CACHE_ADDR]
             updated += 1
     YAML_PATH.write_text(dump_yaml_doc(doc, backend), encoding="utf-8")
-    print(f"  -> {YAML_PATH.name} updated with cached coordinates for {updated} record(s)")
+    print(
+        f"  -> {YAML_PATH.name} updated with cached coordinates for {updated} record(s)"
+    )
 
 
 # --------------------------------------------------------------------------- #
 # 3. Encryption (CryptoJS-compatible)
 # --------------------------------------------------------------------------- #
 
+
 def encrypt_payload(payload_bytes, password):
     """AES-256-ECB with key = SHA-256(password); the template mirrors this."""
     key = bytes.fromhex(hashlib.sha256(password.encode("utf-8")).hexdigest())
     cipher = AES.new(key, AES.MODE_ECB)
-    return base64.b64encode(cipher.encrypt(pad(payload_bytes, AES.block_size))).decode("ascii")
+    return base64.b64encode(cipher.encrypt(pad(payload_bytes, AES.block_size))).decode(
+        "ascii"
+    )
 
 
 # --------------------------------------------------------------------------- #
 # 4. Injection + leak scan
 # --------------------------------------------------------------------------- #
+
 
 def inject_payload(template_text, payload_b64, home):
     count = template_text.count(PAYLOAD_MARKER)
@@ -340,14 +375,15 @@ def inject_payload(template_text, payload_b64, home):
             "comments — every occurrence gets replaced with the full ciphertext."
         )
 
-    chunks = [payload_b64[i:i + 1000] for i in range(0, len(payload_b64), 1000)]
+    chunks = [payload_b64[i : i + 1000] for i in range(0, len(payload_b64), 1000)]
     lines = ",\n".join(f'"{c}"' for c in chunks)
 
     # Home position is NOT secret: injected directly into the JS constant.
-    template_text = (template_text
-                     .replace("__HOME_LAT__", str(home["lat"]))
-                     .replace("__HOME_LON__", str(home["lon"]))
-                     .replace("__HOME_ZOOM__", str(home["zoom"])))
+    template_text = (
+        template_text.replace("__HOME_LAT__", str(home["lat"]))
+        .replace("__HOME_LON__", str(home["lon"]))
+        .replace("__HOME_ZOOM__", str(home["zoom"]))
+    )
     return template_text.replace(PAYLOAD_MARKER, lines)
 
 
@@ -387,6 +423,7 @@ def scan_for_leaks(final_html, template_baseline, records):
 # 5. Main
 # --------------------------------------------------------------------------- #
 
+
 def main():
     print("=" * 64)
     print("MapVeil builder")
@@ -418,13 +455,21 @@ def main():
     if getpass.getpass("Confirm master password: ") != password:
         sys.exit("ERROR: passwords do not match.")
 
-    payload = {"tagColors": tag_colors, "topTagsVisible": top_tags_visible, "records": records}
-    payload_b64 = encrypt_payload(json.dumps(payload, ensure_ascii=False).encode("utf-8"), password)
+    payload = {
+        "tagColors": tag_colors,
+        "topTagsVisible": top_tags_visible,
+        "records": records,
+    }
+    payload_b64 = encrypt_payload(
+        json.dumps(payload, ensure_ascii=False).encode("utf-8"), password
+    )
 
     home = (doc.get("settings") or {}).get("home") or {}
-    home = {"lat": float(home.get("lat", 0.0)),
-            "lon": float(home.get("lon", 0.0)),
-            "zoom": int(home.get("zoom", 8))}
+    home = {
+        "lat": float(home.get("lat", 0.0)),
+        "lon": float(home.get("lon", 0.0)),
+        "zoom": int(home.get("zoom", 8)),
+    }
 
     print("[5/5] Injecting encrypted payload and scanning for leaks...")
     template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -435,7 +480,9 @@ def main():
 
     print("Done.")
     print(f"  -> {OUTPUT_PATH.name} written ({OUTPUT_PATH.stat().st_size:,} bytes)")
-    print(f"  -> {len(tag_colors)} explicit tag color(s), top-tags visible: {top_tags_visible}")
+    print(
+        f"  -> {len(tag_colors)} explicit tag color(s), top-tags visible: {top_tags_visible}"
+    )
     if failed_geo:
         print("  -> Records shown without a map location:")
         for name, reason in failed_geo:
