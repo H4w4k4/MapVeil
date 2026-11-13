@@ -769,6 +769,7 @@
         <div id="app-footer">
           <span id="result-count"></span>
         </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1274,6 +1275,12 @@
       L.control.zoom({ position: "topright" }).addTo(map); /* ...moved to top-right */
       attachTileLayer(0);
 
+      map.on("mousemove", e => {
+        coordText = `lat: ${e.latlng.lat.toFixed(5)}°, lon: ${e.latlng.lng.toFixed(5)}°`;
+        renderFooter();
+      });
+      map.on("mouseout", () => { coordText = ""; renderFooter(); });
+
       /* Clicking anywhere else on the map deselects the pin and closes its
          info bubble. Clicks inside an open popup bubble up to the map too,
          so ignore those (e.g. selecting text in the bubble must keep it). */
@@ -1396,6 +1403,14 @@
       markersByKey.get(key)?.marker.openPopup();
     }
 
+    let countLabel = "";
+    let coordText = "";
+
+    function renderFooter() {
+      el("result-count").textContent =
+        coordText ? countLabel + " · " + coordText : countLabel;
+    }
+
     /* ===================== central update ===================== */
     function update() {
       const list = activeRecords();
@@ -1405,7 +1420,8 @@
       const total = DATA.records.length;
       const onMap = list.filter(r => r.lat != null && r.lon != null).length;
       const label = `${list.length} / ${total} shown · ${onMap} on map`;
-      el("result-count").textContent = label;
+      countLabel = label;
+      renderFooter();
       el("pill-count").textContent = label;   /* pill shows the same stats on mobile map view */
 
       buildTagList();
