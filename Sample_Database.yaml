@@ -25,6 +25,11 @@ settings:
     Watchlist: "#e0565a"      # red
     Service: "#53bddb"        # cyan
     Landmark: "#c792ea"       # purple
+  # Home position of the map, will not be encrypted
+  home:
+    lat: 46.82
+    lon: 8.23
+    zoom: 8
 
   # How many tags are visible in the (collapsed) filter panel before
   # "Show all tags (N)" appears. Collapsed shows most-frequent first;

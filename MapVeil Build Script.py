@@ -329,7 +329,7 @@ def encrypt_payload(payload_bytes, password):
 # 4. Injection + leak scan
 # --------------------------------------------------------------------------- #
 
-def inject_payload(template_text, payload_b64):
+def inject_payload(template_text, payload_b64, home):
     count = template_text.count(PAYLOAD_MARKER)
     if count == 0:
         sys.exit(f"ERROR: marker {PAYLOAD_MARKER} not found in template.html")
@@ -342,6 +342,12 @@ def inject_payload(template_text, payload_b64):
 
     chunks = [payload_b64[i:i + 1000] for i in range(0, len(payload_b64), 1000)]
     lines = ",\n".join(f'"{c}"' for c in chunks)
+
+    # Home position is NOT secret: injected directly into the JS constant.
+    template_text = (template_text
+                     .replace("__HOME_LAT__", str(home["lat"]))
+                     .replace("__HOME_LON__", str(home["lon"]))
+                     .replace("__HOME_ZOOM__", str(home["zoom"])))
     return template_text.replace(PAYLOAD_MARKER, lines)
 
 
@@ -415,9 +421,14 @@ def main():
     payload = {"tagColors": tag_colors, "topTagsVisible": top_tags_visible, "records": records}
     payload_b64 = encrypt_payload(json.dumps(payload, ensure_ascii=False).encode("utf-8"), password)
 
+    home = (doc.get("settings") or {}).get("home") or {}
+    home = {"lat": float(home.get("lat", 0.0)),
+            "lon": float(home.get("lon", 0.0)),
+            "zoom": int(home.get("zoom", 8))}
+
     print("[5/5] Injecting encrypted payload and scanning for leaks...")
     template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
-    final_html = inject_payload(template_text, payload_b64)
+    final_html = inject_payload(template_text, payload_b64, home)
     scan_for_leaks(final_html, template_text, records)
 
     OUTPUT_PATH.write_text(final_html, encoding="utf-8")
