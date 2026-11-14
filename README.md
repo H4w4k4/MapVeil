@@ -8,7 +8,8 @@ points of interest, personal address books — whatever you store in the YAML.
 No server. No accounts. No plaintext on disk. The whole database is encrypted
 with AES-256 and embedded inside the HTML file itself.
 
-Try it here with password `mapveil`: [MapVeil_Directory](MapVeil_Directory.html)
+
+Try it here with password `mapveil`: <a href="https://H4w4k4.github.io/MapVeil/MapVeil_Directory.html" target="_blank" rel="noopener">MapVeil_Directory</a>
 
 ## How it works
 
