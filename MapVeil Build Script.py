@@ -250,7 +250,7 @@ def position_records(records, use_cache):
     )
 
     geocode = RateLimiter(
-        Photon(user_agent="mapveil-builder", timeout=10).geocode,
+        Photon(user_agent="mapveil-builder", timeout=50).geocode,
         min_delay_seconds=GEO_DELAY,
         max_retries=2,
         error_wait_seconds=3,
