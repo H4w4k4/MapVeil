@@ -421,6 +421,49 @@
       }
     }
 
+    /* per-line copy buttons (sidebar cards only) */
+    .copy-line {
+      position: relative;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      font-size: 12px;
+      line-height: 1;
+      border: none;
+      border-radius: 4px;
+      background: var(--chip-bg);
+      color: var(--text-dim);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity .12s;
+    }
+
+    .copy-line:hover .copy-btn {
+      opacity: 1;
+    }
+
+    .copy-btn:hover {
+      color: var(--accent);
+    }
+
+    .copy-btn.ok {
+      color: #3fbf5a;
+    }
+
+    .copy-btn.fail {
+      color: var(--danger);
+    }
+
     .card h3 {
       font-size: 15px;
       font-weight: 650;
@@ -1087,6 +1130,44 @@
         toggle.classList.add("hidden");
       }
     }
+    /* ===================== per-line copy to clipboard ===================== */
+    function addCopyBtn(line, text) {
+      if (!text) return;
+      const btn = document.createElement("button");
+      btn.className = "copy-btn";
+      btn.type = "button";
+      btn.title = "Copy to clipboard";
+      btn.textContent = "⧉";
+      btn.addEventListener("click", e => {
+        e.stopPropagation();                   /* don't select the pin */
+        copyToClipboard(String(text), btn);
+      });
+      line.classList.add("copy-line");
+      line.appendChild(btn);
+    }
+
+    function copyToClipboard(text, btn) {
+      const done = ok => {
+        btn.classList.add(ok ? "ok" : "fail");
+        btn.textContent = ok ? "✓" : "✗";
+        setTimeout(() => {
+          btn.classList.remove("ok", "fail");
+          btn.textContent = "⧉";
+        }, 1200);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { done(document.execCommand("copy")); } catch (e) { done(false); }
+        ta.remove();
+      }
+    }
 
     /* ===================== cards ===================== */
     const BASE_FIELD_KEYS = new Set(["name", "address", "website", "tags", "lat", "lon"]);
@@ -1137,12 +1218,14 @@
 
       const h = document.createElement("h3");
       h.textContent = r.name ?? "(unnamed)";
+      addCopyBtn(h, r.name);
       li.appendChild(h);
 
       if (r.address) {
         const a = document.createElement("p");
         a.className = "addr";
         a.textContent = r.address;
+        addCopyBtn(a, r.address);
         li.appendChild(a);
       }
       if (r.lat == null || r.lon == null) {
@@ -1169,6 +1252,7 @@
         textExtras.forEach(k => {
           const dt = document.createElement("dt"); dt.textContent = k;
           const dd = document.createElement("dd"); dd.textContent = normalizeValue(r[k]);
+          addCopyBtn(dd, normalizeValue(r[k]));
           dl.append(dt, dd);
         });
         li.appendChild(dl);
