@@ -568,6 +568,36 @@
       padding: 30px 10px;
     }
 
+    /* ---------------- sidebar resize handle (desktop only) ---------------- */
+    #sidebar {
+      position: relative;
+    }
+
+    #drag-handle {
+      position: absolute;
+      top: 0;
+      right: -4px;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 10;
+      touch-action: none;
+    }
+
+    #drag-handle:hover {
+      background: color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+
+    body.layout-mobile #drag-handle {
+      display: none;
+    }
+
+    body.dragging-sidebar {
+      cursor: col-resize;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
     /* ---------------- map ---------------- */
     #mapwrap {
       flex: 1;
@@ -804,6 +834,7 @@
         </div>
 
         <ul id="result-list"></ul>
+        <div id="drag-handle" title="Drag to resize"></div>
       </aside>
 
       <div id="mapwrap">
@@ -928,6 +959,7 @@
       });
       el("show-list").addEventListener("click", openList);
       el("close-list-btn").addEventListener("click", closeList);
+      initSidebarResize();
     }
 
     /* ===================== unlock / lock ===================== */
@@ -1524,6 +1556,56 @@
       if (map) map.closePopup();              /* close the open info bubble */
       setActive(null);
       update();
+    }
+
+    /* ===================== sidebar resize (desktop only) ===================== */
+    const SIDEBAR_MIN_W = 280;
+    const SIDEBAR_MAX_W = 700;
+    const SIDEBAR_W_KEY = "mapveil-sidebar-w";
+    let sidebarW = null;                    /* null = CSS default (320 px) */
+
+    function clampSidebarW(w) {
+      return Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, Math.round(w)));
+    }
+
+    function applySidebarW(w) {
+      sidebarW = clampSidebarW(w);
+      el("sidebar").style.width = sidebarW + "px";
+      el("sidebar").style.minWidth = sidebarW + "px";
+      if (map) map.invalidateSize();
+    }
+
+    function initSidebarResize() {
+      /* restore saved width */
+      try {
+        const saved = parseInt(localStorage.getItem(SIDEBAR_W_KEY), 10);
+        if (!isNaN(saved)) applySidebarW(saved);
+      } catch (e) { }
+
+      const sidebar = el("sidebar");
+      let dragging = false, startX = 0, startW = 0;
+
+      el("drag-handle").addEventListener("mousedown", e => {
+        if (currentLayout() === "mobile") return;
+        dragging = true;
+        startX = e.clientX;
+        startW = sidebar.getBoundingClientRect().width;
+        document.body.classList.add("dragging-sidebar");
+        e.preventDefault();
+      });
+
+      window.addEventListener("mousemove", e => {
+        if (!dragging) return;
+        applySidebarW(startW + e.clientX - startX);
+      });
+
+      window.addEventListener("mouseup", () => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove("dragging-sidebar");
+        if (map) map.invalidateSize();
+        try { localStorage.setItem(SIDEBAR_W_KEY, String(sidebarW)); } catch (err) { }
+      });
     }
 
     /* ===================== wiring ===================== */
