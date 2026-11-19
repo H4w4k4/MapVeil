@@ -1611,6 +1611,19 @@
       });
     }
 
+    /* ===================== ESC = lock ===================== */
+    document.addEventListener("keydown", e => {
+      if (e.key !== "Escape" || !DATA) return;
+      if (document.activeElement === el("search")) {
+        e.preventDefault();
+        resetFilters();
+        el("search").blur();
+        return;
+      }
+      e.preventDefault();
+      lockApp();
+    });
+
     /* ===================== wiring ===================== */
     function initApp() {
       el("search").addEventListener("input", e => { state.search = e.target.value; update(); });
